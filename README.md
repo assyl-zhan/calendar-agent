@@ -1,0 +1,3 @@
+Calendar agent with Claude Python SDK
+
+Trying to build agent with anthropic SDK, still in process...
