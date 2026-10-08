@@ -118,7 +118,7 @@ def create_event(title, start, end):
         return json.dumps({"status": "error", "message": "start/end must be ISO 8601 with offset"})
     if end_dt <= start_dt:
         return json.dumps({"status": "error", "message": "end must be after start"})
-    elif start < datetime.now():
+    elif start_dt < datetime.now(tz=tz):
         return json.dumps({"status": "error", "message": "no past events can be created"})
 
     return json.dumps({"status": "created"})
@@ -131,7 +131,7 @@ def run_tool(name, tool_input):
 
 
 user_input = input("Write your prompt here: ")
-messages = [{"role": "user", "content": f"{user_input}"}]
+messages = [{"role": "user", "content": user_input}]
 
 event_created = False
 
