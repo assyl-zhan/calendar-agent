@@ -4,12 +4,13 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import os
 import json
-from quickstart import main as get_daily_events
+from quickstart import main as get_daily_events, create_calendar_event
 
 load_dotenv()
 
 
 client = Anthropic(api_key=os.getenv("API_KEY"))
+CALENDAR_ID = os.getenv("CALENDAR_ID")
 
 tz = timezone(timedelta(hours=5))
 
@@ -156,19 +157,30 @@ tools = [
 ]
 
 def create_event(title, start, end):
-    print(f"[FAKE EVENT]: Event {title} create at {start} - {end}!")
+
 
     try:
         start_dt = datetime.fromisoformat(start)
         end_dt = datetime.fromisoformat(end)
+
+        if start_dt.tzinfo is None or end_dt.tzinfo is None:
+            return json.dumps({"status": "error", "message": "start/end must include a UTC offset"})
+
+        if end_dt <= start_dt:
+                    return json.dumps({"status": "error", "message": "end must be after start"})
+        elif start_dt < datetime.now(tz=tz):
+            return json.dumps({"status": "error", "message": "no past events can be created"})
+
+        result = create_calendar_event(title, start, end)
+
     except ValueError:
         return json.dumps({"status": "error", "message": "start/end must be ISO 8601 with offset"})
-    if end_dt <= start_dt:
-        return json.dumps({"status": "error", "message": "end must be after start"})
-    elif start_dt < datetime.now(tz=tz):
-        return json.dumps({"status": "error", "message": "no past events can be created"})
-
-    return json.dumps({"status": "created"})
+    
+    result_data = json.loads(result)
+    if result_data.get("status") == "created":
+        return json.dumps({"status": "created"})
+    else:
+        return result
 
 def check_event(start, end):
 
@@ -230,7 +242,7 @@ while True:
                     "type": "tool_result",
                     "tool_use_id": block.id,
                     "content": result,
-                    "is_error": json.loads(result).get("status") != "error"
+                    "is_error": json.loads(result).get("status") == "error"
                 }
                 )
 
