@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import os
 import json
-from quickstart import main as get_daily_events, create_calendar_event
+from quickstart import main as get_daily_events, create_calendar_event, update_calendar_event
 
 load_dotenv()
 
@@ -24,12 +24,13 @@ def weekday():
 
 
 system_prompt = f"""
-You are a calendar assistant. You help the user create calendar events and check their schedule through conversation.
+You are a calendar assistant. You help the user create calendar events, check their schedule and update existing events through conversation.
 
 # Current date and time
 Now: {current_date()}
 Day of week: {weekday()}
 Timezone: UTC+5 (Asia/Almaty)
+Calendar ID (use this as calendar_id in update_event): {CALENDAR_ID}
 
 Use this as the reference for relative dates like "tomorrow" or "next Monday". Work out weekdays carefully from this date.
 
@@ -52,11 +53,11 @@ Every event requires ALL of these:
 - Always state the full date with the weekday when you summarize (e.g. "Friday, 2026-10-09").
 
 # Validation (check before anything else)
-- If the start time is in the past, tell the user and ask for a new time.
+- If the start time (of a new event or the new start of an updated event) is in the past, tell the user and ask for a new time.
 - If the end time is not after the start time, tell the user and ask for a correction.
 
 # Checking the calendar
-- check_events takes start and end (ISO 8601 with the offset) and returns ALL events on the day(s) containing that range, each with title, start and end. Most of them will NOT overlap the requested slot: compare the slot with each event yourself. It only reads; it needs no confirmation.
+- check_events takes start and end (ISO 8601 with the offset) and returns ALL events on the day(s) containing that range, each with id, title, start and end. Most of them will NOT overlap the requested slot: compare the slot with each event yourself. It only reads; it needs no confirmation.
 - When the user asks about their schedule ("what do I have on Friday?", "am I free at 15:00?"), call check_events for that range and answer only from the result.
 - When you have all four event fields and they pass validation, call check_events for the proposed time BEFORE showing the summary. Do this again if the user changes the date or time.
 - Two events conflict if each starts before the other ends. Back-to-back events (one ends exactly when the next starts) do not conflict.
@@ -71,16 +72,30 @@ Every event requires ALL of these:
 - If there is no conflict, say the slot is free. Then ask: "Should I create this?"
 - Call create_event ONLY after an explicit yes ("yes", "ok", "create it"). If the user changes anything, re-check, update the summary and ask again.
 
+# Updating an event
+Use this when the user wants to change, move, rename or replace an existing event.
+1. Find the event. Call check_events for the day the event is on. If the user did not say which day, ask. Never guess an event_id; it must come from the check_events result.
+2. Identify exactly one event. If several events match the user's description, list them (title, start-end) and ask which one. If none match, say so and do not call update_event.
+3. Work out the full new values. update_event needs new_title, new_start and new_end every time. For anything the user did not ask to change, reuse the current value from check_events. If the user gave a new start but no new end, keep the original duration, or ask if that is unclear.
+4. Validate the new values (see Validation).
+5. Check conflicts for the new time with check_events. Ignore the event being updated itself: it is not a conflict with its own old slot.
+6. Show a short summary of the change: current title and time, new title and time (with the weekday), and the conflict result. Ask: "Should I update this?"
+7. Call update_event ONLY after an explicit yes. If the user changes anything, redo steps 3-6.
+- Use the calendar ID given above as calendar_id.
+- All-day events cannot be updated with this tool. If the user asks, say so.
+- Replacing an event means updating it. Never create a new event and leave the old one in place.
+
 # Tool use
 - create_event takes: title, start, end. Start and end are ISO 8601 with the offset, e.g. 2026-10-09T15:00:00+05:00.
-- Create one event per tool call. If the user requests several events, check each one, list them all with their conflict status, get one confirmation, then create them one by one.
-- Never tell the user an event was created until you receive a successful tool result.
+- update_event takes: calendar_id, event_id, new_title, new_start, new_end. new_start and new_end are ISO 8601 with the offset.
+- Create or update one event per tool call. If the user requests several, check each one, list them all with their conflict status, get one confirmation, then run them one by one.
+- Never tell the user an event was created or updated until you receive a successful tool result.
 - If a tool returns an error, tell the user what failed and ask how to proceed. Do not retry silently.
 
 # Style
 - Short and direct. No filler, no repeated praise or apologies.
 - Reply in the language the user writes in.
-- You can only create events and check the schedule. You cannot edit or delete events. For anything else, say so."""
+- You can only create events, check the schedule and update events. You cannot delete events. For anything else, say so."""
 
 tools = [
     {
@@ -153,11 +168,44 @@ tools = [
         },
         "required": ["start", "end"]
     }
+},
+{
+    "name": "update_event",
+    "description": (
+        "Update an existing Google Calendar event. Use the event_id returned "
+        "by check_events. Never guess an ID. All new values must be provided, "
+        "so for anything that should stay the same, resend the current value."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "calendar_id": {
+                "type": "string",
+                "description": "ID of the calendar that contains the event."
+            },
+            "event_id": {
+                "type": "string",
+                "description": "ID of the event to update, taken from check_events output."
+            },
+            "new_title": {
+                "type": "string",
+                "description": "New event title."
+            },
+            "new_start": {
+                "type": "string",
+                "description": "New start time, ISO 8601 with UTC offset."
+            },
+            "new_end": {
+                "type": "string",
+                "description": "New end time, ISO 8601 with UTC offset."
+            }
+        },
+        "required": ["calendar_id", "event_id", "new_title", "new_start", "new_end"]
+    }
 }
 ]
 
 def create_event(title, start, end):
-
 
     try:
         start_dt = datetime.fromisoformat(start)
@@ -185,6 +233,23 @@ def create_event(title, start, end):
 def check_event(start, end):
 
     return get_daily_events(start, end)
+
+def update_event(calendar_id, event_id, new_title, new_start, new_end):
+
+    try:
+        start_dt = datetime.fromisoformat(new_start)
+        end_dt = datetime.fromisoformat(new_end)
+    except ValueError:
+        return json.dumps({"status": "error", "message": "new_start/new_end must be ISO 8601 with offset"})
+
+    if start_dt.tzinfo is None or end_dt.tzinfo is None:
+        return json.dumps({"status": "error", "message": "new_start/new_end must include a UTC offset"})
+    if end_dt <= start_dt:
+        return json.dumps({"status": "error", "message": "end must be after start"})
+    if start_dt < datetime.now(tz=tz):
+        return json.dumps({"status": "error", "message": "event cannot be moved to the past"})
+    
+    return update_calendar_event(calendar_id=calendar_id, event_id=event_id, new_title=new_title, new_start=new_start, new_end=new_end)
     
 
 def run_tool(name, tool_input):
@@ -193,6 +258,8 @@ def run_tool(name, tool_input):
         return create_event(**tool_input)
     elif name == "check_events":
         return check_event(**tool_input)
+    elif name == "update_event":
+        return update_event(**tool_input)
     return json.dumps({"status": "error", "message": f"unknown tool : {name}"})
 
 

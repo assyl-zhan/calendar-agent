@@ -78,6 +78,7 @@ def main(start, end):
 
   for event in events_result.get("items", []):
     events.append({
+       "id": event.get("id"),
       "title": event.get("summary", "no title"),
       "start": event["start"].get("dateTime", event["start"].get("date")),
       "end": event["end"].get("dateTime", event["end"].get("date")),
@@ -104,6 +105,20 @@ def create_calendar_event(title, start, end):
   return json.dumps({"status": "created", "link": event.get("htmlLink")})
    
 
+def update_calendar_event(calendar_id, event_id, new_title, new_start, new_end):
+
+  event = service.events().get(calendarId=calendar_id,  eventId=event_id).execute()
+
+  event['summary'] = new_title
+  event['start'] = {"dateTime": new_start,}
+  event['end'] = {"dateTime": new_end}
+
+  try:
+    updated_event = service.events().update(calendarId=calendar_id, eventId=event_id, body=event).execute()
+    return json.dumps({"status": "updated", "link": event.get("htmlLink")})
+
+  except HttpError as error:
+     return json.dumps({"status": "error", "message": f"{error}"})
 
 if __name__ == "__main__":
   print(create_calendar_event("test event", "2026-10-20T15:00:00+05:00", "2026-10-20T16:00:00+05:00"))
