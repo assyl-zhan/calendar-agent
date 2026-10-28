@@ -306,58 +306,52 @@ def run_tool(name, tool_input):
     
     return json.dumps({"status": "error", "message": f"unknown tool : {name}"})
 
+conversations = {}
+
+def run_turn(chat_id, user_content):
+
+    messages = conversations.setdefault(chat_id, [])
+    start = len(messages)
+    messages.append({"role": "user", "content": user_content})
+
+    try:
+
+        while True:
+
+            response = client.messages.create(
+                max_tokens=4096,
+                model="claude-sonnet-5",
+                messages=messages,
+                system=system_prompt,
+                tools=tools
+            )
+
+            if response.stop_reason != "tool_use":
+                messages.append({"role": "assistant", "content": response.content})
+                return "".join(block.text for block in response.content if block.type == 'text')
+
+            elif response.stop_reason == "tool_use":
+                tool_results = []
+
+                for block in response.content:
+                    if block.type == "tool_use":
+                        result = run_tool(block.name, block.input)
 
 
-user_input = input("Write your prompt here: ")
-messages = [{"role": "user", "content": user_input}]
+                        tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result,
+                            "is_error": json.loads(result).get("status") == "error"
+                        }
+                        )
 
 
-while True:
-
-    response = client.messages.create(
-        max_tokens=4096,
-        model="claude-sonnet-5",
-        messages=messages,
-        system=system_prompt,
-        tools=tools
-    )
-
-    if response.stop_reason == "end_turn":
-        for block in response.content:
-            if block.type == "text":
-                print(block.text)
-        
-        messages.append({"role": "assistant", "content": response.content})
-
-
-        input_1 = input("Write here: ")
-        if input_1.strip().lower() in ("quit", "exit"):
-            break
-        messages.append({"role": "user", "content": input_1})
-
-    elif response.stop_reason == "tool_use":
-        tool_results = []
-
-        for block in response.content:
-            if block.type == "tool_use":
-                result = run_tool(block.name, block.input)
-
-
-                tool_results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result,
-                    "is_error": json.loads(result).get("status") == "error"
-                }
-                )
-
-
-        messages.append({"role": "assistant", "content": response.content})
-        messages.append({"role": "user", "content": tool_results})
-
-    else:
-        messages.append({"role": "assistant", "content": "unexpected stop reason behaviour"})
-        break
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "user", "content": tool_results})
+    except Exception as e:
+        del messages[start:]
+        return f"Mesage: {e}"
 
     
