@@ -1,0 +1,8 @@
+services:
+  bot:
+    build: .
+    container_name: calen_bot
+    env_file: .env
+    volumes:
+      - ./token.json:/calen_bot/token.json
+      - ./credentials.json:/calen_bot/credentials.json:ro
