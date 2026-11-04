@@ -19,8 +19,14 @@ tz = timezone(timedelta(hours=5))
 
 from google.oauth2 import service_account
 
-creds = service_account.Credentials.from_service_account_file(
+sa_json = os.getenv("GOOGLE_SA_JSON")
+if sa_json:
+  creds = service_account.Credentials.from_service_account_info(
+        json.loads(sa_json), scopes=SCOPES)
+else:
+  creds = service_account.Credentials.from_service_account_file(
     "service_account.json", scopes=SCOPES)
+
 service = build("calendar", "v3", credentials=creds)
 
 
