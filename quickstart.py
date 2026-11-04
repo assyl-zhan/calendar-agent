@@ -17,23 +17,10 @@ CALENDAR_ID = os.getenv("CALENDAR_ID")
 
 tz = timezone(timedelta(hours=5))
 
-creds = None
+from google.oauth2 import service_account
 
-if os.path.exists("token.json"):
-    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-    # If there are no (valid) credentials available, let the user log in.
-if not creds or not creds.valid:
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    else:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            "credentials.json", SCOPES
-        )
-        creds = flow.run_local_server(port=0)
-    # Save the credentials for the next run
-    with open("token.json", "w") as token:
-        token.write(creds.to_json())
-
+creds = service_account.Credentials.from_service_account_file(
+    "service_account.json", scopes=SCOPES)
 service = build("calendar", "v3", credentials=creds)
 
 
@@ -58,7 +45,7 @@ def main(start, end):
   events_result = (
       service.events()
       .list(
-          calendarId="primary",
+          calendarId=CALENDAR_ID,
           timeMin=day_start.isoformat(),
           timeMax=day_end.isoformat(),
           maxResults=20,
